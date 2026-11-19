@@ -172,27 +172,45 @@ main(void)
         data.packets_processed = 0;
         data.random_seed = random_seed;
         data.total_sends = 0;
-        data.last_packet_id = -1;
+        data.stations[0].last_packet_id = -1;
+        data.stations[1].last_packet_id = -1;
         data.data_transmission_failure_probability = failure_probability;
         data.ack_transmission_failure_probability = ack_failure_probability;
         data.timeout_interval = timeout_interval;
 
         schedule_send_event(simulation_run,
-                            simulation_run_get_time(simulation_run));
+                            simulation_run_get_time(simulation_run), 0);
+
+        schedule_send_event(simulation_run,
+                            simulation_run_get_time(simulation_run), 1);
 
         while (data.packets_processed < NUMBER_PACKETS_TO_SEND) {
           simulation_run_execute_event(simulation_run);
         }
 
-        if (data.last_packet_id == -1) {
+        if (data.stations[0].last_packet_id == -1) {
           printf("ERROR: last packet id not set in the simulation run with "
                  "random seed %u\n", random_seed);
         } else {
           for (i = 0; i < send_window_size; i++) {
             data.total_sends +=
-              simulation_run->windowdata->send_window[i].transmission_count;
-            if (simulation_run->windowdata->send_window[i].id ==
-                data.last_packet_id) {
+              data.stations[0].send_window[i].transmission_count;
+            if (data.stations[0].send_window[i].id ==
+                data.stations[0].last_packet_id) {
+              break;
+            }
+          }
+        }
+
+        if (data.stations[1].last_packet_id == -1) {
+          printf("ERROR: last packet id not set in the simulation run with "
+                 "random seed %u\n", random_seed);
+        } else {
+          for (i = 0; i < send_window_size; i++) {
+            data.total_sends +=
+              data.stations[1].send_window[i].transmission_count;
+            if (data.stations[1].send_window[i].id ==
+                data.stations[1].last_packet_id) {
               break;
             }
           }

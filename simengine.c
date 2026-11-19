@@ -335,7 +335,6 @@ simulation_run_free_memory(Simulation_Run_Ptr this_simulation_run)
   /* Clean up the simulation_run. */
   xfree(this_simulation_run->eventlist);
   xfree(this_simulation_run->clock);
-  xfree(this_simulation_run->windowdata->send_window);
   xfree(this_simulation_run->windowdata);
   xfree(this_simulation_run);
 }
@@ -371,16 +370,7 @@ window_data_new(int send_window_size)
   Window_Data_Ptr new_window_data;
 
   new_window_data = (Window_Data_Ptr) xmalloc(sizeof(Window_Data));
-  new_window_data->send_window_size = send_window_size;
-  new_window_data->send_window = (Window_Entry_Ptr)
     xmalloc(sizeof(Window_Entry) * send_window_size);
-
-  for (i = 0; i < send_window_size; i++) {
-    new_window_data->send_window[i].id = i;
-    new_window_data->send_window[i].processed = false;
-    new_window_data->send_window[i].acked = false;
-    new_window_data->send_window[i].transmission_count = 0;
-  }
 
   for (i = 0; i < RECEIVE_WINDOW_SIZE; i++) {
     new_window_data->receive_window[i].id = i;

@@ -5,7 +5,7 @@
 
 int min (int a, int b);
 
-long int schedule_send_event(Simulation_Run_Ptr, Time);
+long int schedule_send_event(Simulation_Run_Ptr, Time, int station_id);
 void send_event(Simulation_Run_Ptr, Packet);
 
 long int schedule_receive_event(Simulation_Run_Ptr, Time, Packet);

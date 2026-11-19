@@ -22,7 +22,7 @@ struct _eventlist_;
 struct _rand_stream_;
 struct _window_entry_;
 struct _window_data_;
-struct packet;
+struct _packet_;
 struct _fifoqueue_;
 struct _queue_container_;
 struct _server_;
@@ -40,16 +40,24 @@ typedef struct _clock_
   double time;
 } Clock, * Clock_Ptr;
 
-typedef struct packet
+typedef enum {WAITING, TRANSMITTING} Packet_Status;
+
+typedef struct _packet_ 
 {
+  double arrive_time;
+  double service_time;
+  int station_id;
   int id;
-} Packet;
+  Packet_Status status;
+  int collision_count;
+} Packet, * Packet_Ptr;
 
 typedef struct _event_
 {
   const char * description;
   void (* function)(struct _simulation_run_*, Packet);
   Packet attachment;
+  int station_id;
 } Event, * Event_Ptr;
 
 typedef struct _event_container_
@@ -69,13 +77,6 @@ typedef struct _eventlist_
   int size;
 } Eventlist, * Eventlist_Ptr;
 
-typedef struct _rand_stream_
-{
-  unsigned rand_max;
-  unsigned seed;
-  unsigned next;
-} Rand_Stream, * Rand_Stream_Ptr;
-
 typedef struct _window_entry_
 {
   int id;
@@ -86,10 +87,15 @@ typedef struct _window_entry_
 
 typedef struct _window_data_
 {
-  Window_Entry * send_window;
   Window_Entry receive_window[RECEIVE_WINDOW_SIZE];
-  int send_window_size;
 } Window_Data, * Window_Data_Ptr;
+
+typedef struct _rand_stream_
+{
+  unsigned rand_max;
+  unsigned seed;
+  unsigned next;
+} Rand_Stream, * Rand_Stream_Ptr;
 
 /*
  * FIFO queue object keeps the queue size and contains pointers to containers
