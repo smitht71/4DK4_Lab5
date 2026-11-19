@@ -1,0 +1,573 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+
+#include "trace.h"
+#include "simengine.h"
+
+/*
+ * Prototype static functions that are local to simlib.
+ */
+
+static Clock_Ptr
+clock_new(void);
+
+static void
+simulation_run_set_time (Simulation_Run_Ptr, double);
+
+static Eventlist_Ptr
+eventlist_new(void);
+
+static Window_Data_Ptr
+window_data_new(int send_window_size);
+
+static Eventlist_Ptr
+simulation_run_get_eventlist(Simulation_Run_Ptr);
+
+static Event_Container_Ptr
+simulation_run_get_event(Simulation_Run_Ptr);
+
+#ifdef TRACE_ON /* This is only used when tracing is active. */
+static void event_print_type(Event);
+#endif /* TRACE_ON */
+
+/*
+ * Create a new simulation_run. The simulation_run will include a clock, an
+ * event list, and its Selective Repeat window data.
+ */
+
+Simulation_Run_Ptr
+simulation_run_new(int send_window_size)
+{
+  Simulation_Run_Ptr new_simulation_run;
+
+  new_simulation_run = (Simulation_Run_Ptr) xmalloc(sizeof(Simulation_Run));
+  new_simulation_run->eventlist = eventlist_new();
+  new_simulation_run->clock = clock_new();
+  new_simulation_run->windowdata = window_data_new(send_window_size);
+  return new_simulation_run;
+}
+
+/*
+ * When a new simulation_run is defined and created, a clock is created which is
+ * part of the simulation_run.
+ */
+ 
+static
+Clock_Ptr clock_new (void)
+{
+  Clock_Ptr new_clock;
+
+  new_clock = (Clock_Ptr) xmalloc(sizeof(Clock));
+  new_clock->time = 0.0;
+  return new_clock;
+}
+
+/*
+ * Given a pointer to a simulation_run, find out the current clock time.
+ */
+
+double
+simulation_run_get_time (Simulation_Run_Ptr this_simulation_run)
+{
+  return this_simulation_run->clock->time;
+}
+
+/*
+ * Given a pointer to a simulation_run, set the clock time.
+ */
+
+static
+void simulation_run_set_time (Simulation_Run_Ptr this_simulation_run,
+			      double time)
+{
+  this_simulation_run->clock->time = time;
+}
+
+/*
+ * Given a pointer to a simulation_run, get simulation_run data.
+ */
+
+void *
+simulation_run_data (Simulation_Run_Ptr this_simulation_run)
+{
+  return this_simulation_run->data;
+}
+
+/*
+ * Given a pointer to a simulation_run, put simulation_run data.
+ */
+
+void
+simulation_run_set_data (Simulation_Run_Ptr this_simulation_run, void * data)
+{
+  this_simulation_run->data = data;
+}
+
+/*
+ * This function makes an entry on the event list. It must be passed the
+ * simulation_run, the type of event, and the time that the event is to occur. An
+ * event_contents pointer can also be passed which can be recovered when the
+ * event function is called. The event list itself is a double linked list.
+ */
+
+long int
+simulation_run_schedule_event(Simulation_Run_Ptr simulation_run,
+			      Event new_event, double new_event_time)
+{
+  double current_time;
+  Eventlist_Ptr event_list;
+  Event_Container_Ptr new_container;
+  Event_Container_Ptr current_container;
+  Event_Container_Ptr next_container;
+  static long int event_id = 1;
+
+  current_time = simulation_run_get_time(simulation_run);
+  event_list = simulation_run_get_eventlist(simulation_run);
+
+  TRACE(printf("At %.3f : ", current_time);)
+  TRACE(event_print_type(new_event);)
+  TRACE(printf("Scheduled for  %.3f \n", new_event_time);)
+
+  /* Test for time scheduling error. */
+  if (new_event_time < current_time) {
+    printf("Error: Scheduling backwards in time: ");
+    printf("Event time = %f (Clock time = %f) \n", new_event_time, 
+    current_time);
+    printf("Event scheduled = \"%s\"\n", new_event.description);
+    exit(1);
+  }
+
+  new_container = (Event_Container_Ptr) xmalloc(sizeof(Event_Container));
+  new_container->occurrence_time = new_event_time;
+  new_container->event = new_event;
+  new_container->next_container = NULL;
+  new_container->previous_container = NULL;
+  new_container->event_id = event_id;
+
+  if (event_list->size == 0) {
+    /* The list is empty. */
+    event_list->front_ptr = new_container;
+    event_list->back_ptr = new_container;
+    event_list->size++;
+    return event_id++;
+  }
+
+  if (event_list->front_ptr->occurrence_time > new_event_time) {
+    /* Add to front of the list. */
+    event_list->front_ptr->previous_container = new_container;
+    new_container->next_container = event_list->front_ptr;
+    event_list->front_ptr = new_container;
+
+    event_list->size++;
+    return event_id++;
+  }
+
+  if (event_list->back_ptr->occurrence_time <= new_event_time) {
+    /* Add to the back of the list. */
+    event_list->back_ptr->next_container = new_container;
+    new_container->previous_container = event_list->back_ptr;
+    event_list->back_ptr = new_container;
+
+    event_list->size++;
+    return event_id++;
+  }
+
+  /* Add to the middle of the list. */
+  current_container = event_list->front_ptr;
+  next_container = event_list->front_ptr->next_container;
+
+  while(next_container->occurrence_time <= new_event_time) {
+    current_container = next_container;
+    next_container = current_container->next_container;
+  }
+  current_container->next_container = new_container;
+  new_container->previous_container = current_container;
+  next_container->previous_container = new_container;
+  new_container->next_container = next_container;
+
+  event_list->size++;
+  return event_id++;
+}
+
+
+/*
+ * Given an existing event id, remove the corresponding event from the event
+ * list. The event content pointer is returned (which could be NULL). If the
+ * requested event does not exist, it will return a NULL pointer.
+ */
+
+void *
+simulation_run_deschedule_event(Simulation_Run_Ptr simulation_run,
+				long int event_id)
+{
+  int i;
+  Event_Container_Ptr current_container, found_container=NULL,
+    next_container, previous_container;
+  void * content_ptr = NULL;
+
+  Eventlist_Ptr event_list;
+
+  event_list = simulation_run_get_eventlist(simulation_run);
+
+  if (event_list->size == 0) {
+    printf("*** ERROR: No Events are scheduled ... cannot deschedule! ***\n");
+    exit(1);
+  }
+
+  current_container = event_list->front_ptr;
+  next_container = current_container->next_container;
+
+  for(i=0; i<event_list->size; i++) {
+
+    if(current_container->event_id == event_id) {
+
+      found_container = current_container;
+      previous_container = found_container->previous_container;
+      next_container = found_container->next_container;
+
+      /* Front of list. Adjust the front pointer. */
+      if (event_list->front_ptr == found_container)
+        event_list->front_ptr = next_container;
+
+      /* Back of list. Adjust the back pointer (could be both fron and
+	 back). */
+      if (event_list->back_ptr == found_container)
+        event_list->back_ptr = previous_container;
+
+      /* If the next event exists, adjust its previous event pointer. */
+      if (next_container != NULL)
+        next_container->previous_container = previous_container;
+
+      /* If the previous event exists, adjust its next event pointer. */
+      if (previous_container != NULL)
+        previous_container->next_container = next_container;
+
+      content_ptr = found_container->data_ptr;
+
+      TRACE(printf("At %.2f : ", simulation_run_get_time(simulation_run));)
+      TRACE(event_print_type(found_container->event);)
+      TRACE(printf("descheduled\n");)
+
+      free((void*) found_container);
+      event_list->size--;
+      break;
+    }
+    current_container = current_container->next_container;
+
+  }
+  return content_ptr;
+}
+
+/*
+ * Retrieve the event at the top of the event list, i.e., the next event to
+ * occur. This is called by execute_next_event which then passes execution to
+ * its event function.
+ */
+
+static Event_Container_Ptr
+simulation_run_get_event(Simulation_Run_Ptr simulation_run)
+{
+  Eventlist_Ptr event_list;
+  Event_Container_Ptr top_container;
+
+  event_list = simulation_run_get_eventlist(simulation_run);
+
+  if (event_list->size == 0) {
+    printf("*** Error: No Events are scheduled ... cannot continue! ***\n");
+    exit(1);
+  }
+
+  top_container = event_list->front_ptr;
+
+  if (event_list->size == 1) {
+    event_list->front_ptr = NULL;
+    event_list->back_ptr = NULL;
+    event_list->size--;
+  } else {
+
+    top_container->next_container->previous_container = NULL;
+    event_list->front_ptr = top_container->next_container;
+    event_list->size--;
+  }
+  return (top_container);
+}
+
+/*
+ * Get the next event from the event list and pass program execution to its
+ * event function.
+ */
+
+void
+simulation_run_execute_event(Simulation_Run_Ptr simulation_run)
+{
+  Event_Container_Ptr current_container;
+
+  current_container = simulation_run_get_event(simulation_run);
+  simulation_run_set_time(simulation_run, 
+			  current_container->occurrence_time);
+
+  TRACE(printf("\n");)
+  TRACE(event_print_type(current_container->event);)
+  TRACE(printf("occurring at %.3f\n", simulation_run_get_time(simulation_run));)
+
+  (*(current_container->event.function))(simulation_run,
+			current_container->event.attachment);
+  xfree(current_container);
+}
+
+/*
+ * Free up simulation_run memory.
+ */
+
+void
+simulation_run_free_memory(Simulation_Run_Ptr this_simulation_run)
+{
+  Eventlist_Ptr event_list;
+
+  /* Clean out the event list. */
+  event_list = this_simulation_run->eventlist;
+
+  while (event_list->size > 0) {
+    xfree((void*) simulation_run_get_event(this_simulation_run));
+  }
+
+  /* Clean up the simulation_run. */
+  xfree(this_simulation_run->eventlist);
+  xfree(this_simulation_run->clock);
+  xfree(this_simulation_run->windowdata->send_window);
+  xfree(this_simulation_run->windowdata);
+  xfree(this_simulation_run);
+}
+
+/*
+ * Functions for handling various event list operations.
+ *
+ * Create a new event list. This is called when a simulation_run is
+ * created. The event list is included in the simulation_run.
+ */
+
+static Eventlist_Ptr
+eventlist_new(void)
+{
+  Eventlist_Ptr new_event_list;
+
+  new_event_list = (Eventlist_Ptr) xmalloc(sizeof(Eventlist));
+
+  new_event_list->front_ptr = NULL;
+  new_event_list->back_ptr = NULL;
+  new_event_list->size = 0;
+  return new_event_list;
+}
+
+/*
+ * Create the simulation's Selective Repeat windows and initialize each slot.
+ */
+
+static Window_Data_Ptr
+window_data_new(int send_window_size)
+{
+  int i;
+  Window_Data_Ptr new_window_data;
+
+  new_window_data = (Window_Data_Ptr) xmalloc(sizeof(Window_Data));
+  new_window_data->send_window_size = send_window_size;
+  new_window_data->send_window = (Window_Entry_Ptr)
+    xmalloc(sizeof(Window_Entry) * send_window_size);
+
+  for (i = 0; i < send_window_size; i++) {
+    new_window_data->send_window[i].id = i;
+    new_window_data->send_window[i].processed = false;
+    new_window_data->send_window[i].acked = false;
+    new_window_data->send_window[i].transmission_count = 0;
+  }
+
+  for (i = 0; i < RECEIVE_WINDOW_SIZE; i++) {
+    new_window_data->receive_window[i].id = i;
+    new_window_data->receive_window[i].processed = false;
+    new_window_data->receive_window[i].acked = false;
+    new_window_data->receive_window[i].transmission_count = 0;
+  }
+
+  return new_window_data;
+}
+
+/*
+ * Get a pointer to the eventlist. This is intended for use only by simlib.
+ */
+
+static Eventlist_Ptr
+simulation_run_get_eventlist(Simulation_Run_Ptr simulation_run)
+{
+  return simulation_run->eventlist;
+}
+
+/*
+ * Given a pointer to a simulation_run, get simulation_run data.
+ */
+
+static Window_Data_Ptr
+simulation_run_window_data (Simulation_Run_Ptr this_simulation_run)
+{
+  return this_simulation_run->windowdata;
+}
+
+/*
+ * Some functions that are only needed if trace is enabled.
+ */
+
+#ifdef TRACE_ON
+
+static void
+event_print_type(Event event)
+{
+  printf("%s ", event.description);
+}
+
+#endif /* TRACE_ON */
+
+/*
+ * Random number generator functions.
+ */
+
+/*
+ * Functions for random streams, which permit multiple overlapping random number
+ * generator streams (and seeds) at once.
+ */
+
+Rand_Stream_Ptr
+rand_stream_new(unsigned seed)
+{
+  Rand_Stream_Ptr new_stream;
+
+  new_stream = (Rand_Stream_Ptr) xmalloc(sizeof(Rand_Stream));
+  rand_stream_initialize(new_stream, seed);
+  return new_stream;
+}
+
+void
+rand_stream_initialize(Rand_Stream_Ptr rand_stream, unsigned seed)
+{
+  rand_stream->rand_max = 32767;
+  rand_stream->seed  = seed;
+  rand_stream->next = seed;
+}
+
+/*
+ * Use our own code for rand so that we can make it thread-safe. This generator
+ * is a pretty poor one but sufficient for our purposes.
+ */
+
+unsigned
+rand_stream_get(Rand_Stream_Ptr rand_stream)
+{
+  rand_stream->next = rand_stream->next * 1103515245 + 12345;
+  return((unsigned)(rand_stream->next/65536) % rand_stream->rand_max);
+}
+
+double
+rand_stream_uniform_generator(Rand_Stream_Ptr rand_stream)
+{
+  double r;
+
+  do {
+    r = (double) rand_stream_get(rand_stream)/(double)rand_stream->rand_max;
+  } while (r == 1 || r == 0);
+
+if (r > 1.0) {
+  printf ("***** ERROR: Random() out of bounds! ***** \n");
+  exit(0);
+ } else return r;
+}
+
+double
+rand_stream_exponential_generator(Rand_Stream_Ptr rand_stream, double mean)
+{
+  double u = 0.0;
+
+  while (u == 0.0 || u == 1) u = rand_stream_uniform_generator(rand_stream);
+  return -1.0 * log(u) * mean;
+}
+
+void
+random_generator_initialize(unsigned iseed)
+{
+  srand(iseed);
+}
+
+/*
+ * Generate a random number uniformly distributed over (0, 1).
+ */
+
+double
+uniform_generator(void)
+{
+  double r;
+
+  do {
+    r = (double) rand()/(double) RAND_MAX;
+  } while (r == 1 || r == 0);
+
+if (r > 1.0) {
+  printf ("***** ERROR: Random() out of bounds! ***** \n");
+  exit(0);
+ } else return r;
+}
+
+/*
+ * Generate exponentially distributed random numbers.
+ */
+
+double
+exponential_generator(double mean)
+{
+  double u = 0.0;
+
+  while (u == 0.0 || u == 1) u = uniform_generator();
+  return -1.0 * log(u) * mean;
+}
+
+/*
+ * Create a front-end fo malloc that performs out-of-memory testing.
+ */
+
+void *
+xmalloc(unsigned size)
+{
+  void * a_ptr;
+
+  if((a_ptr = (void *) malloc(size)) != NULL) return a_ptr;
+  else {
+    printf("***** ERROR: Out of memory ***** \n");
+    exit(1);
+  }
+}
+
+/*
+ * Create a front-end fo calloc that performs out-of-memory testing.
+ */
+
+void *
+xcalloc(unsigned num, unsigned size)
+{
+  void * a_ptr;
+
+  if((a_ptr = (void *) calloc(num, size)) != NULL) return a_ptr;
+  else {
+    printf(" ***** WARNING: Out of memory ***** \n");
+    exit(1);
+  }
+}
+
+/*
+ * Create a front-end for free that checks for null pointers.
+ */
+
+void
+xfree(void * ptr)
+{
+  if(ptr == NULL) {
+    printf("Warning: Attempting to free a NULL pointer.\n");
+  }
+  else free(ptr);
+}
