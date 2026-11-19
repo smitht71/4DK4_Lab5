@@ -413,6 +413,171 @@ simulation_run_window_data (Simulation_Run_Ptr this_simulation_run)
 }
 
 /*
+ * FIFO queue functions
+ *
+ * Make a new (empty) FIFO queue. This will return a pointer to the created
+ * Fifoqueue. The FIFO queue is a singly linked list.
+ */
+
+Fifoqueue_Ptr
+fifoqueue_new(void)
+{
+  Fifoqueue_Ptr queue_id;
+
+  queue_id = (Fifoqueue_Ptr) xmalloc(sizeof(Fifoqueue));
+  queue_id->size = 0;
+  queue_id->front_ptr = NULL;
+  queue_id->back_ptr  = NULL;
+  return queue_id;
+}
+
+/*
+ * Put something into a FIFO queue. Whatever it is should be cast to a void
+ * pointer.
+ */
+
+void
+fifoqueue_put(Fifoqueue_Ptr queue_ptr, void * content_ptr)
+{
+  Queue_Container_Ptr queue_container_ptr;
+
+  queue_container_ptr = (Queue_Container_Ptr) xmalloc(sizeof(Queue_Container));
+  queue_container_ptr->content_ptr = content_ptr;
+  queue_container_ptr->next_ptr = NULL;
+
+  if (queue_ptr->size == 0) {
+    queue_ptr->front_ptr = queue_container_ptr;
+    queue_ptr->back_ptr =  queue_container_ptr;
+  }
+  else {
+    queue_ptr->back_ptr->next_ptr = queue_container_ptr;
+    queue_ptr->back_ptr = queue_container_ptr;
+  }
+  queue_ptr->size++;
+}
+
+/*
+ * Take something out of a FIFO queue. Whatever it is should be cast to a void
+ * pointer.
+ */
+
+void *
+fifoqueue_get(Fifoqueue_Ptr queue_ptr)
+{
+  Queue_Container_Ptr removed_container_ptr;
+  void* content_ptr;
+
+  if (queue_ptr->size > 0) {
+    removed_container_ptr = queue_ptr->front_ptr;
+    queue_ptr->front_ptr = removed_container_ptr->next_ptr;
+    content_ptr = removed_container_ptr->content_ptr;
+    free((char*) removed_container_ptr);
+
+    if(queue_ptr->size == 1) queue_ptr->back_ptr = NULL;
+    queue_ptr->size--;
+  }
+  else {
+    content_ptr = NULL;
+  }
+  return content_ptr;
+}
+
+/*
+ * Get the number of objects currently in the Fifoqueue.
+ */
+
+int
+fifoqueue_size(Fifoqueue_Ptr queue_ptr)
+{
+  return queue_ptr->size;
+}
+
+/*
+ * Get a pointer to the object at the front of the Fifoqueue.
+ */
+
+void*
+fifoqueue_see_front(Fifoqueue_Ptr queue_ptr)
+{
+  return queue_ptr->front_ptr->content_ptr;
+}
+
+/*
+ * Server functions.
+ *
+ * Create and return a pointer to an empty server. The server is marked FREE.
+ */
+
+/*
+ * Test if the server is FREE or BUSY.
+ */
+
+Server_State
+server_state(Server_Ptr a_server)
+{
+  return(a_server->state);
+}
+
+Server_Ptr
+server_new(void)
+{
+  Server_Ptr server_ptr;
+
+  server_ptr = (Server_Ptr) xmalloc(sizeof(Server));
+  server_ptr->customer_in_service = NULL;
+  server_ptr->state = FREE;
+  return server_ptr;
+}
+
+/*
+ * Pass a server pointer and an object pointer to place the object in the
+ * server. The server is marked BUSY.
+ */
+
+void
+server_put(Server_Ptr server, void* content_ptr)
+{
+  if (server_state(server) == BUSY) {
+      printf("Error: Cannot put into busy server.\n");
+      exit(1);
+    }
+
+  server->customer_in_service = content_ptr;
+  server->state = BUSY;
+}
+
+/*
+ * Remove whatever is in the server. The simulation_run will exit if this is
+ * called when the server is FREE. So the server state should be tested first to
+ * be sure.
+ */
+
+void *
+server_get(Server_Ptr server)
+{
+  void *entry;
+
+  if (server_state(server) == FREE) {
+      printf("Error: Cannot get from free server.\n");
+      exit(1);
+    }
+
+  entry = server->customer_in_service;
+  server->customer_in_service = NULL;
+  server->state = FREE;
+  return entry;
+}
+
+/*
+ * Random number generator functions.
+ */
+
+/*
+ * Functions for random streams, which permit multiple overlapping random number
+ * generator streams (and seeds) at once.
+ */
+
+/*
  * Some functions that are only needed if trace is enabled.
  */
 

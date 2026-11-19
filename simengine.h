@@ -23,6 +23,9 @@ struct _rand_stream_;
 struct _window_entry_;
 struct _window_data_;
 struct packet;
+struct _fifoqueue_;
+struct _queue_container_;
+struct _server_;
 
 typedef struct _simulation_run_
 {
@@ -87,6 +90,41 @@ typedef struct _window_data_
   Window_Entry receive_window[RECEIVE_WINDOW_SIZE];
   int send_window_size;
 } Window_Data, * Window_Data_Ptr;
+
+/*
+ * FIFO queue object keeps the queue size and contains pointers to containers
+ * at the front and back of the queue. The queue container objects are kept on
+ * a singly linked list. Each container has a content pointer that tracks the
+ * object placed on the FIFO queue.
+ */
+
+struct _queue_container_;
+
+typedef struct _fifoqueue_
+{
+  struct _queue_container_ * front_ptr;
+  struct _queue_container_ * back_ptr;
+  int size;
+} Fifoqueue, * Fifoqueue_Ptr;
+
+typedef struct _queue_container_
+{
+  void * content_ptr;
+  struct _queue_container_ * next_ptr;
+} Queue_Container, *Queue_Container_Ptr;
+
+
+/*
+ * Server object and definitions. 
+ */
+
+typedef enum{FREE, BUSY} Server_State;
+
+typedef struct _server_
+{
+  Server_State state;
+  void * customer_in_service;
+} Server, * Server_Ptr;
 
 Simulation_Run_Ptr simulation_run_new(int send_window_size);
 double simulation_run_get_time(Simulation_Run_Ptr);
