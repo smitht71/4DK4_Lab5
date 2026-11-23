@@ -16,6 +16,7 @@ typedef struct _station_
   long int packet_count;
   double accumulated_delay;
   double mean_delay;
+  int sequential_collisions;
 } Station, * Station_Ptr;
 
 /**********************************************************************/

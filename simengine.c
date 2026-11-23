@@ -377,6 +377,7 @@ window_data_new(int send_window_size)
     new_window_data->receive_window[i].processed = false;
     new_window_data->receive_window[i].acked = false;
     new_window_data->receive_window[i].transmission_count = 0;
+    new_window_data->receive_window[i].reservation_sent = false;
   }
 
   return new_window_data;

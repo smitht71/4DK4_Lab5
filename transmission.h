@@ -5,6 +5,12 @@
 
 int min (int a, int b);
 
+long int schedule_reservation_send_event(Simulation_Run_Ptr, Time, int station_id);
+void reservation_send_event(Simulation_Run_Ptr, Packet);
+
+long int schedule_reservation_receive_event(Simulation_Run_Ptr, Time, Packet);
+void reservation_receive_event(Simulation_Run_Ptr, Packet);
+
 long int schedule_send_event(Simulation_Run_Ptr, Time, int station_id);
 void send_event(Simulation_Run_Ptr, Packet);
 

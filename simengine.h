@@ -49,7 +49,6 @@ typedef struct _packet_
   int station_id;
   int id;
   Packet_Status status;
-  int collision_count;
 } Packet, * Packet_Ptr;
 
 typedef struct _event_
@@ -57,7 +56,6 @@ typedef struct _event_
   const char * description;
   void (* function)(struct _simulation_run_*, Packet);
   Packet attachment;
-  int station_id;
 } Event, * Event_Ptr;
 
 typedef struct _event_container_
@@ -83,6 +81,7 @@ typedef struct _window_entry_
   bool processed;
   bool acked;
   int transmission_count;
+  bool reservation_sent;
 } Window_Entry, * Window_Entry_Ptr;
 
 typedef struct _window_data_

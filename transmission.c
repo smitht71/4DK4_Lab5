@@ -9,6 +9,143 @@ int min(int a, int b)
 }
 
 long int
+schedule_reservation_send_event(Simulation_Run_Ptr simulation_run, Time event_time, int station_id)
+{
+    Event event;
+    event.description = "Reservation Send Event";
+    event.function = reservation_send_event;
+    event.attachment.id = -1;
+    event.attachment.station_id = station_id;
+
+    // change to slotted R-ALOHA - THIS JUST MOVES TIME TO BEGINNING OF NEXT SLOT
+    Time slot_time = ceil((event_time - GUARD_TIME) / RESERVATION_SLOT_DURATION) * RESERVATION_SLOT_DURATION + GUARD_TIME;
+  
+    if (slot_time < event_time)
+        slot_time += RESERVATION_SLOT_DURATION;
+
+    // If the next reservation slot is in the next packet duration, move to the next packet duration
+    if(fmod(slot_time, TOTAL_PACKET_DURATION) > RESERVATION_DURATION) {
+        slot_time += TOTAL_PACKET_DURATION - (fmod(slot_time, TOTAL_PACKET_DURATION)) + GUARD_TIME;
+    }
+
+    return simulation_run_schedule_event(simulation_run, event, slot_time);
+}
+
+void reservation_send_event(Simulation_Run_Ptr simulation_run, Packet packet)
+{
+    int station_id = packet.station_id;
+    Simulation_Run_Data_Ptr data = (Simulation_Run_Data_Ptr) simulation_run_data(simulation_run);
+    Channel_Ptr channel = data->channel;
+
+    // Get index of next unsent packet in the send window
+    int send_window_index = -1;
+    for (int i = 0; i < data->stations[station_id].send_window_size; i++) {
+        if (!data->stations[station_id].send_window[i].reservation_sent) {
+            send_window_index = i;
+            break;
+        }
+    }
+
+    if (send_window_index == -1) {
+        // No unsent packets in the send window, nothing to do
+        return;
+    }
+
+    // Create packet with next id in send window
+    Packet new_packet;
+    new_packet.id = data->stations[station_id].send_window[send_window_index].id;
+    new_packet.station_id = station_id;
+
+    new_packet.status = TRANSMITTING;
+
+    if(get_channel_state(channel) != IDLE) {
+        /* The channel is now colliding. */
+        set_channel_state(channel, COLLISION);
+    } 
+    else {
+        /* The channel is successful, for now. */
+        set_channel_state(channel, SUCCESS);
+    }
+
+    // Increment the transmission count for the packet
+    increment_transmitting_stn_count(channel);
+    data->stations[station_id].send_window[send_window_index].reservation_sent = true;
+
+    schedule_reservation_receive_event(simulation_run, simulation_run_get_time(simulation_run) + RESERVATION_SLOT_NO_GUARD_DURATION, new_packet);
+}
+
+long int
+schedule_reservation_receive_event(Simulation_Run_Ptr simulation_run, Time event_time,
+               Packet packet)
+{
+    Event event;
+    event.description = "Reservation Receive Event";
+    event.function = reservation_receive_event;
+    event.attachment = packet;
+
+    return simulation_run_schedule_event(simulation_run, event, event_time);
+}
+
+void reservation_receive_event(Simulation_Run_Ptr simulation_run, Packet packet)
+{
+    Simulation_Run_Data_Ptr data = (Simulation_Run_Data_Ptr) simulation_run_data(simulation_run);
+    Channel_Ptr channel = data->channel;
+    Time backoff_duration;
+    Window_Data_Ptr window_data = (Window_Data_Ptr) simulation_run->windowdata;
+    
+    /* This station has stopped transmitting. */
+    decrement_transmitting_stn_count(channel);
+
+    /* Check if the packet was successful. */
+    if(get_channel_state(channel) == SUCCESS) {
+
+        set_channel_state(channel, IDLE);
+
+        data->stations[packet.station_id].sequential_collisions = 0;
+
+        packet.status = WAITING;
+
+        TRACE(printf("Packet %ld: Reservation successful at time %.3f\n", packet.id, simulation_run_get_time(simulation_run));)
+
+        // Schedule the send event for the packet
+        schedule_send_event(simulation_run, simulation_run_get_time(simulation_run) + RESERVATION_DURATION + GUARD_TIME, packet.station_id);
+    } 
+    else {
+
+        /* The transmission was unsuccessful. Clean up the channel state,
+        backoff, and try again. */
+        packet.status = WAITING;
+
+        data->stations[packet.station_id].sequential_collisions++;
+
+        // Reset reservation sent
+        for (int i = 0; i < RECEIVE_WINDOW_SIZE; i++) {
+            if(window_data->receive_window[i].id == packet.id) {
+                window_data->receive_window[i].reservation_sent = false;
+                break;
+            }
+        }
+
+        TRACE(printf("Packet %ld: Collision at time  %.3f\n", packet.id, simulation_run_get_time(simulation_run)););
+
+        /* If the collision is over, free up the channel. */
+        if(get_transmitting_stn_count(channel) == 0) {
+            set_channel_state(channel, IDLE);
+        }
+
+        // For discrte slots - backoff duration will be multiple of slot duration
+        double slot_index = floor(uniform_generator() * pow(2.0, min(data->stations[packet.station_id].sequential_collisions, 3)));
+        backoff_duration = slot_index * RESERVATION_SLOT_DURATION;
+    }
+
+    // Schedule the next reservation attempt for immediately or after the backoff
+    schedule_reservation_send_event(simulation_run, simulation_run_get_time(simulation_run) + backoff_duration, packet.station_id);
+}
+
+
+// Everything below deals with DATA rather than reservation
+
+long int
 schedule_send_event(Simulation_Run_Ptr simulation_run, Time event_time, int station_id)
 {
     Event event;
@@ -16,7 +153,6 @@ schedule_send_event(Simulation_Run_Ptr simulation_run, Time event_time, int stat
     event.function = send_event;
     event.attachment.id = -1;
     event.attachment.station_id = station_id;
-    event.station_id = station_id;
 
     return simulation_run_schedule_event(simulation_run, event, event_time);
 }
@@ -122,6 +258,7 @@ void receive_event(Simulation_Run_Ptr simulation_run, Packet packet)
         }
         window_data->receive_window[RECEIVE_WINDOW_SIZE - 1].processed = false;
         window_data->receive_window[RECEIVE_WINDOW_SIZE - 1].acked = false;
+        window_data->receive_window[RECEIVE_WINDOW_SIZE - 1].reservation_sent = false;
     }
 
     // Increment the number of packets processed
@@ -213,6 +350,7 @@ void ack_event(Simulation_Run_Ptr simulation_run, Packet packet)
         }
         data->stations[packet.station_id].send_window[data->stations[packet.station_id].send_window_size - 1].processed = false;
         data->stations[packet.station_id].send_window[data->stations[packet.station_id].send_window_size - 1].acked = false;
+        data->stations[packet.station_id].send_window[data->stations[packet.station_id].send_window_size - 1].reservation_sent = false;
         data->stations[packet.station_id].send_window[data->stations[packet.station_id].send_window_size - 1].transmission_count = 0;
     }
 
@@ -277,8 +415,9 @@ void timeout_event(Simulation_Run_Ptr simulation_run, Packet packet)
         }
     }
 
-    // Mark the packet as unprocessed so it can be resent
+    // Mark the packet as unprocessed and unreserved so it can be resent
     data->stations[packet.station_id].send_window[packet_index].processed = false;
+    data->stations[packet.station_id].send_window[packet_index].reservation_sent = false;
     TRACE(printf("Packet %d: Timeout event for packet at time %.3f, resending\n", packet.id, simulation_run_get_time(simulation_run));)
 
     // Check if ack frees up an empty slot in the send window

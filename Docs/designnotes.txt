@@ -1,0 +1,14 @@
+Packet Structure:
+
+Transmission time (data): 0.002
+Transmission time (reservation): 0.0005
+
+8x slots per
+
+0.02s total for a slot
+
+Backoff is binary exponential, uniform between 1 and 2^n where n is number of collisions
+n is capped at 3
+
+
+
