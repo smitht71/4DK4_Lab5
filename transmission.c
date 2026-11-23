@@ -231,10 +231,10 @@ void receive_event(Simulation_Run_Ptr simulation_run, Packet packet)
     bool packet_in_receive_window = false;
     // Mark the packet as processed in the receive window
     for (int i = 0; i < RECEIVE_WINDOW_SIZE; i++) {
-        if(window_data->receive_window[i].id == packet.id) {
-            if(!window_data->receive_window[i].processed) {
-                window_data->receive_window[i].processed = true;
-                window_data->receive_window[i].acked = true;
+        if(window_data->receive_window[packet.station_id][i].id == packet.id) {
+            if(!window_data->receive_window[packet.station_id][i].processed) {
+                window_data->receive_window[packet.station_id][i].processed = true;
+                window_data->receive_window[packet.station_id][i].acked = true;
                 packet_in_receive_window = true;
             }
             break;
@@ -244,32 +244,35 @@ void receive_event(Simulation_Run_Ptr simulation_run, Packet packet)
     int max_id = (1 << NUM_ID_BITS) - 1;
 
     // Schedule ack event if the packet is in the receive window or if it is within the send window size of the first packet in the receive window
-    bool schedule_ack = packet_in_receive_window || ((((window_data->receive_window[0].id - packet.id) + max_id) % max_id) <= data->stations[packet.station_id].send_window_size);
+    bool schedule_ack = packet_in_receive_window || ((((window_data->receive_window[packet.station_id][0].id - packet.id) + max_id) % max_id) <= data->stations[packet.station_id].send_window_size);
 
     // Check if the first packet in the receive window has been acknowledged, and if so, shift the window to the left
-    while(window_data->receive_window[0].acked) {
+    while(window_data->receive_window[packet.station_id][0].acked) {
 
         // Shift the receive window to the right
         for (int i = 0; i < RECEIVE_WINDOW_SIZE - 1; i++) {
-            window_data->receive_window[i] = window_data->receive_window[i + 1];
+            window_data->receive_window[packet.station_id][i] =
+                window_data->receive_window[packet.station_id][i + 1];
         }
         // Reset the last entry in the receive window
         if(RECEIVE_WINDOW_SIZE > 1) {
-            window_data->receive_window[RECEIVE_WINDOW_SIZE - 1].id = window_data->receive_window[RECEIVE_WINDOW_SIZE - 2].id + 1;
+            window_data->receive_window[packet.station_id][RECEIVE_WINDOW_SIZE - 1].id =
+                window_data->receive_window[packet.station_id][RECEIVE_WINDOW_SIZE - 2].id + 1;
         } else {
-            window_data->receive_window[RECEIVE_WINDOW_SIZE - 1].id++;
+            window_data->receive_window[packet.station_id][RECEIVE_WINDOW_SIZE - 1].id++;
         }
-        if(window_data->receive_window[RECEIVE_WINDOW_SIZE - 1].id > (1 << NUM_ID_BITS) - 1) {
-            window_data->receive_window[RECEIVE_WINDOW_SIZE - 1].id = 0;
+        if(window_data->receive_window[packet.station_id][RECEIVE_WINDOW_SIZE - 1].id > (1 << NUM_ID_BITS) - 1) {
+            window_data->receive_window[packet.station_id][RECEIVE_WINDOW_SIZE - 1].id = 0;
         }
-        window_data->receive_window[RECEIVE_WINDOW_SIZE - 1].processed = false;
-        window_data->receive_window[RECEIVE_WINDOW_SIZE - 1].acked = false;
-        window_data->receive_window[RECEIVE_WINDOW_SIZE - 1].reservation_sent = false;
+        window_data->receive_window[packet.station_id][RECEIVE_WINDOW_SIZE - 1].processed = false;
+        window_data->receive_window[packet.station_id][RECEIVE_WINDOW_SIZE - 1].acked = false;
+        window_data->receive_window[packet.station_id][RECEIVE_WINDOW_SIZE - 1].reservation_sent = false;
     }
 
     // Increment the number of packets processed
     if(packet_in_receive_window) {
         data->packets_processed++;
+        data->stations[packet.station_id].packets_received++;
 
         data->stations[packet.station_id].last_packet_id = packet.id;
     }
@@ -288,7 +291,7 @@ void receive_event(Simulation_Run_Ptr simulation_run, Packet packet)
         TRACE(printf("Station %d, packet %d: received at time %.5f, but it is not in the receive window or is a duplicate\n", packet.station_id, packet.id, simulation_run_get_time(simulation_run));)
         TRACE(printf("Station %d receive window: ", packet.station_id);)
         for (int i = 0; i < RECEIVE_WINDOW_SIZE; i++) {
-            TRACE(printf("%d ", window_data->receive_window[i].id);)
+            TRACE(printf("%d ", window_data->receive_window[packet.station_id][i].id);)
         }
         TRACE(printf("\n");)
     }
@@ -318,7 +321,7 @@ void ack_event(Simulation_Run_Ptr simulation_run, Packet packet)
     bool open_send_slot_beginning = false;
     int packet_index = -1;
     for (int i = 0; i < data->stations[packet.station_id].send_window_size; i++) {
-        if (!data->stations[packet.station_id].send_window[i].processed) {
+        if (!data->stations[packet.station_id].send_window[i].reservation_sent) {
             open_send_slot_beginning = true;
         }
         if(data->stations[packet.station_id].send_window[i].id == packet.id) {
@@ -363,7 +366,7 @@ void ack_event(Simulation_Run_Ptr simulation_run, Packet packet)
     // Check if ack frees up an empty slot in the send window
     bool open_send_slot_end = false;
     for (int i = 0; i < data->stations[packet.station_id].send_window_size; i++) {
-        if (!data->stations[packet.station_id].send_window[i].processed) {
+        if (!data->stations[packet.station_id].send_window[i].reservation_sent) {
             open_send_slot_end = true;
             break;
         }
@@ -372,7 +375,7 @@ void ack_event(Simulation_Run_Ptr simulation_run, Packet packet)
     // Schedule send event if there is an open slot in the send window and no other send events are scheduled
     if(open_send_slot_end && !open_send_slot_beginning) {
         TRACE(printf("Station %d: scheduling next send event at current time %.5f\n", packet.station_id, simulation_run_get_time(simulation_run));)
-        schedule_send_event(simulation_run, simulation_run_get_time(simulation_run), packet.station_id);
+        schedule_reservation_send_event(simulation_run, simulation_run_get_time(simulation_run), packet.station_id);
     }
 }
 
@@ -415,7 +418,7 @@ void timeout_event(Simulation_Run_Ptr simulation_run, Packet packet)
     // Check if there is an open slot in the send window
     bool open_send_slot_beginning = false;
     for (int i = 0; i < data->stations[packet.station_id].send_window_size; i++) {
-        if (!data->stations[packet.station_id].send_window[i].processed) {
+        if (!data->stations[packet.station_id].send_window[i].reservation_sent) {
             open_send_slot_beginning = true;
             break;
         }
@@ -429,7 +432,7 @@ void timeout_event(Simulation_Run_Ptr simulation_run, Packet packet)
     // Check if ack frees up an empty slot in the send window
     bool open_send_slot_end = false;
     for (int i = 0; i < data->stations[packet.station_id].send_window_size; i++) {
-        if (!data->stations[packet.station_id].send_window[i].processed) {
+        if (!data->stations[packet.station_id].send_window[i].reservation_sent) {
             open_send_slot_end = true;
             break;
         }
@@ -438,6 +441,6 @@ void timeout_event(Simulation_Run_Ptr simulation_run, Packet packet)
     // Schedule send event if there is an open slot in the send window and no other send events are scheduled
     if(open_send_slot_end && !open_send_slot_beginning) {
         TRACE(printf("Station %d: scheduling next send event at current time %.5f\n", packet.station_id, simulation_run_get_time(simulation_run));)
-        schedule_send_event(simulation_run, simulation_run_get_time(simulation_run), packet.station_id);
+        schedule_reservation_send_event(simulation_run, simulation_run_get_time(simulation_run), packet.station_id);
     }
 }

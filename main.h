@@ -13,7 +13,7 @@ typedef struct _station_
   int last_packet_id;
   Window_Entry * send_window;
   int send_window_size;
-  long int packet_count;
+  long int packets_received;
   double accumulated_delay;
   double mean_delay;
   int sequential_collisions;

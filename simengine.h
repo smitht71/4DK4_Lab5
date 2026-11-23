@@ -86,7 +86,7 @@ typedef struct _window_entry_
 
 typedef struct _window_data_
 {
-  Window_Entry receive_window[RECEIVE_WINDOW_SIZE];
+  Window_Entry receive_window[NUMBER_STATIONS][RECEIVE_WINDOW_SIZE];
 } Window_Data, * Window_Data_Ptr;
 
 typedef struct _rand_stream_

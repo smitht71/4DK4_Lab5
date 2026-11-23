@@ -366,18 +366,20 @@ eventlist_new(void)
 static Window_Data_Ptr
 window_data_new(int send_window_size)
 {
-  int i;
+  int i, station_index;
   Window_Data_Ptr new_window_data;
 
   (void) send_window_size;
   new_window_data = (Window_Data_Ptr) xmalloc(sizeof(Window_Data));
 
-  for (i = 0; i < RECEIVE_WINDOW_SIZE; i++) {
-    new_window_data->receive_window[i].id = i;
-    new_window_data->receive_window[i].processed = false;
-    new_window_data->receive_window[i].acked = false;
-    new_window_data->receive_window[i].transmission_count = 0;
-    new_window_data->receive_window[i].reservation_sent = false;
+  for (station_index = 0; station_index < NUMBER_STATIONS; station_index++) {
+    for (i = 0; i < RECEIVE_WINDOW_SIZE; i++) {
+      new_window_data->receive_window[station_index][i].id = i;
+      new_window_data->receive_window[station_index][i].processed = false;
+      new_window_data->receive_window[station_index][i].acked = false;
+      new_window_data->receive_window[station_index][i].transmission_count = 0;
+      new_window_data->receive_window[station_index][i].reservation_sent = false;
+    }
   }
 
   return new_window_data;

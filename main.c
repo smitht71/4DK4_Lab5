@@ -32,7 +32,7 @@ main(void)
   int timeout_interval_index, seed_index, i;
   int station_index, max_send_window_size = 0;
   Simulation_Run_Ptr simulation_run;
-  Station stations[2] = {{0}};
+  Station stations[NUMBER_STATIONS] = {{0}};
   Simulation_Run_Data data = {0};
   double elapsed_time, elapsed_time_sum, average_elapsed_time;
   double efficiency_sum, average_efficiency;
@@ -147,13 +147,14 @@ main(void)
     return 1;
   }
 
-  for (station_index = 0; station_index < 2; station_index++) {
+  for (station_index = 0; station_index < NUMBER_STATIONS; station_index++) {
     stations[station_index].send_window = (Window_Entry *) malloc(
       sizeof(*stations[station_index].send_window) * max_send_window_size);
     if (stations[station_index].send_window == NULL) {
       perror("Unable to allocate station send window");
-      free(stations[0].send_window);
-      free(stations[1].send_window);
+      for (station_index = 0; station_index < NUMBER_STATIONS; station_index++) {
+        free(stations[station_index].send_window);
+      }
       fclose(csv_file);
       free(seed_elapsed_times);
       free(seed_efficiencies);
@@ -188,11 +189,11 @@ main(void)
         random_seed = RANDOM_SEEDS[seed_index];
         random_generator_initialize(random_seed);
 
-        for (station_index = 0; station_index < 2; station_index++) {
+        for (station_index = 0; station_index < NUMBER_STATIONS; station_index++) {
           stations[station_index].id = station_index;
           stations[station_index].last_packet_id = -1;
           stations[station_index].send_window_size = send_window_size;
-          stations[station_index].packet_count = 0;
+          stations[station_index].packets_received = 0;
           stations[station_index].accumulated_delay = 0.0;
           stations[station_index].mean_delay = 0.0;
           stations[station_index].sequential_collisions = 0;
@@ -217,11 +218,10 @@ main(void)
         data.ack_transmission_failure_probability = ack_failure_probability;
         data.timeout_interval = timeout_interval;
 
-        schedule_reservation_send_event(simulation_run,
-                            simulation_run_get_time(simulation_run), 0);
-
-        schedule_reservation_send_event(simulation_run,
-                            simulation_run_get_time(simulation_run), 1);
+        for (station_index = 0; station_index < NUMBER_STATIONS; station_index++) {
+          schedule_reservation_send_event(simulation_run,
+                              simulation_run_get_time(simulation_run), station_index);
+        }
 
         while (data.packets_processed < NUMBER_PACKETS_TO_SEND) {
           simulation_run_execute_event(simulation_run);
@@ -270,11 +270,14 @@ main(void)
         sends_per_success_sum += seed_sends_per_success[seed_index];
 
         printf("Ws=%d pd=%.3f pa=%.3f timeout=%.6f seed=%u: "
-               "completed at %.3f s, packets=%ld, "
+               "completed at %.3f s, packets=%ld "
+               "(station %d=%ld, station %d=%ld), "
                "average sends per success=%.3f, efficiency=%.2f%%\n",
                send_window_size, failure_probability, ack_failure_probability,
                timeout_interval, random_seed,
                elapsed_time, data.packets_processed,
+               data.stations[0].id, data.stations[0].packets_received,
+               data.stations[1].id, data.stations[1].packets_received,
                seed_sends_per_success[seed_index],
                data.efficiency);
 
@@ -307,8 +310,9 @@ main(void)
                 send_window_size, failure_probability, ack_failure_probability,
                 timeout_interval);
         fclose(csv_file);
-        free(stations[0].send_window);
-        free(stations[1].send_window);
+        for (station_index = 0; station_index < NUMBER_STATIONS; station_index++) {
+          free(stations[station_index].send_window);
+        }
         free(seed_elapsed_times);
         free(seed_efficiencies);
         free(seed_sends_per_success);
@@ -336,8 +340,9 @@ main(void)
     }
   }
 
-  free(stations[0].send_window);
-  free(stations[1].send_window);
+  for (station_index = 0; station_index < NUMBER_STATIONS; station_index++) {
+    free(stations[station_index].send_window);
+  }
   free(seed_elapsed_times);
   free(seed_efficiencies);
   free(seed_sends_per_success);

@@ -3,6 +3,7 @@
 
 #define SEND_WINDOW_SIZE_LIST 1 // Ws values to simulate
 #define RECEIVE_WINDOW_SIZE 10 //Wr
+#define NUMBER_STATIONS 2
 #define NUM_ID_BITS 8 // m, 2^m must be at least the largest Ws plus Wr
 #define DATA_TRANSMISSION_FAILURE_PROBABILITY_LIST 0.05 // pd values to simulate
 #define ACK_TRANSMISSION_FAILURE_PROBABILITY_LIST 0.05 // pa values to simulate
