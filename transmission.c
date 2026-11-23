@@ -47,7 +47,7 @@ void reservation_send_event(Simulation_Run_Ptr simulation_run, Packet packet)
     }
 
     if (send_window_index == -1) {
-        // No unsent packets in the send window, nothing to do
+        TRACE(printf("Station %d: no packets left in send window requiring reservation", packet.station_id);)
         return;
     }
 
@@ -90,8 +90,7 @@ void reservation_receive_event(Simulation_Run_Ptr simulation_run, Packet packet)
 {
     Simulation_Run_Data_Ptr data = (Simulation_Run_Data_Ptr) simulation_run_data(simulation_run);
     Channel_Ptr channel = data->channel;
-    Time backoff_duration;
-    Window_Data_Ptr window_data = (Window_Data_Ptr) simulation_run->windowdata;
+    Time backoff_duration = 0.0;
     
     /* This station has stopped transmitting. */
     decrement_transmitting_stn_count(channel);
@@ -105,10 +104,17 @@ void reservation_receive_event(Simulation_Run_Ptr simulation_run, Packet packet)
 
         packet.status = WAITING;
 
-        TRACE(printf("Packet %ld: Reservation successful at time %.3f\n", packet.id, simulation_run_get_time(simulation_run));)
+        TRACE(printf("Station %d, packet %d: Reservation successful at time %.5f\n", packet.station_id, packet.id, simulation_run_get_time(simulation_run));)
 
-        // Schedule the send event for the packet
-        schedule_send_event(simulation_run, simulation_run_get_time(simulation_run) + RESERVATION_DURATION + GUARD_TIME, packet.station_id);
+        Time event_time = simulation_run_get_time(simulation_run);
+        Time packet_phase = fmod(event_time, TOTAL_PACKET_DURATION);
+        int reservation_slot_index =
+            (int) floor(packet_phase / RESERVATION_SLOT_DURATION);
+        Time packet_start = event_time - packet_phase;
+        Time data_slot_time = packet_start + RESERVATION_DURATION + GUARD_TIME +
+            reservation_slot_index * DATA_TRANSMISSION_TIME;
+
+        schedule_send_event(simulation_run, data_slot_time, packet.station_id);
     } 
     else {
 
@@ -119,14 +125,14 @@ void reservation_receive_event(Simulation_Run_Ptr simulation_run, Packet packet)
         data->stations[packet.station_id].sequential_collisions++;
 
         // Reset reservation sent
-        for (int i = 0; i < RECEIVE_WINDOW_SIZE; i++) {
-            if(window_data->receive_window[i].id == packet.id) {
-                window_data->receive_window[i].reservation_sent = false;
+        for (int i = 0; i < data->stations[packet.station_id].send_window_size; i++) {
+            if(data->stations[packet.station_id].send_window[i].id == packet.id) {
+                data->stations[packet.station_id].send_window[i].reservation_sent = false;
                 break;
             }
         }
 
-        TRACE(printf("Packet %ld: Collision at time  %.3f\n", packet.id, simulation_run_get_time(simulation_run)););
+        TRACE(printf("Station %d, packet %d: Collision at time %.5f. # Seq collisions = %d\n", packet.station_id, packet.id, simulation_run_get_time(simulation_run), data->stations[packet.station_id].sequential_collisions););
 
         /* If the collision is over, free up the channel. */
         if(get_transmitting_stn_count(channel) == 0) {
@@ -184,20 +190,20 @@ void send_event(Simulation_Run_Ptr simulation_run, Packet packet)
     schedule_timeout_event(simulation_run, simulation_run_get_time(simulation_run) + data->timeout_interval + DATA_TRANSMISSION_TIME, new_packet);
     data->stations[station_id].send_window[send_window_index].processed = true;
 
-    TRACE(printf("Packet %ld: sent at time %.3f\n", new_packet.id, simulation_run_get_time(simulation_run));)
+    TRACE(printf("Station %d, packet %d: sent at time %.5f\n", new_packet.station_id, new_packet.id, simulation_run_get_time(simulation_run));)
 
-    bool open_send_slot = false;
-    for (int i = 0; i < data->stations[station_id].send_window_size; i++) {
-        if (!data->stations[station_id].send_window[i].processed) {
-            open_send_slot = true;
-            break;
-        }
-    }
+    // bool open_send_slot = false;
+    // for (int i = 0; i < data->stations[station_id].send_window_size; i++) {
+    //     if (!data->stations[station_id].send_window[i].processed) {
+    //         open_send_slot = true;
+    //         break;
+    //     }
+    // }
 
-    if(open_send_slot) {
-        TRACE(printf("Scheduling next send event at time %.3f\n", simulation_run_get_time(simulation_run) + DATA_TRANSMISSION_TIME);)
-        schedule_send_event(simulation_run, simulation_run_get_time(simulation_run) + DATA_TRANSMISSION_TIME, station_id);
-    }
+    // if(open_send_slot) {
+    //     TRACE(printf("Station %d: scheduling next send event at time %.5f\n", station_id, simulation_run_get_time(simulation_run) + DATA_TRANSMISSION_TIME);)
+    //     schedule_send_event(simulation_run, simulation_run_get_time(simulation_run) + DATA_TRANSMISSION_TIME, station_id);
+    // }
 }
 
 long int
@@ -216,7 +222,7 @@ void receive_event(Simulation_Run_Ptr simulation_run, Packet packet)
 {
     Simulation_Run_Data_Ptr data = (Simulation_Run_Data_Ptr) simulation_run_data(simulation_run);
     if(uniform_generator() < data->data_transmission_failure_probability) {
-        TRACE(printf("Packet %ld: Packet lost during transmission at time %.3f\n", packet.id, simulation_run_get_time(simulation_run));)
+        TRACE(printf("Station %d, packet %d: Packet lost during transmission at time %.5f\n", packet.station_id, packet.id, simulation_run_get_time(simulation_run));)
         return;
     }
 
@@ -272,15 +278,15 @@ void receive_event(Simulation_Run_Ptr simulation_run, Packet packet)
     if(schedule_ack) {
         schedule_ack_event(simulation_run, simulation_run_get_time(simulation_run) + ACK_TRANSMISSION_TIME + DATA_PROPAGATION_DELAY, packet);
         if(packet_in_receive_window) {
-            TRACE(printf("Packet %d: received at time %.3f, total packets processed: %ld\n", packet.id, simulation_run_get_time(simulation_run), data->packets_processed);)
+            TRACE(printf("Station %d, packet %d: received at time %.5f, total packets processed: %ld\n", packet.station_id, packet.id, simulation_run_get_time(simulation_run), data->packets_processed);)
         } else {
-            TRACE(printf("Packet %d: received at time %.3f, but it is a duplicate\n", packet.id, simulation_run_get_time(simulation_run));)
+            TRACE(printf("Station %d, packet %d: received at time %.5f, but it is a duplicate\n", packet.station_id, packet.id, simulation_run_get_time(simulation_run));)
         }
-       // TRACE(printf("Packet %d: received at time %.3f, total packets processed: %ld\n", packet.id, simulation_run_get_time(simulation_run), data->packets_processed);)
+       // TRACE(printf("Station %d, packet %d: received at time %.5f, total packets processed: %ld\n", packet.station_id, packet.id, simulation_run_get_time(simulation_run), data->packets_processed);)
     }
     else {
-        TRACE(printf("Packet %d: received at time %.3f, but it is not in the receive window or is a duplicate\n", packet.id, simulation_run_get_time(simulation_run));)
-        TRACE(printf("Receive window: ");)
+        TRACE(printf("Station %d, packet %d: received at time %.5f, but it is not in the receive window or is a duplicate\n", packet.station_id, packet.id, simulation_run_get_time(simulation_run));)
+        TRACE(printf("Station %d receive window: ", packet.station_id);)
         for (int i = 0; i < RECEIVE_WINDOW_SIZE; i++) {
             TRACE(printf("%d ", window_data->receive_window[i].id);)
         }
@@ -304,7 +310,7 @@ void ack_event(Simulation_Run_Ptr simulation_run, Packet packet)
 {
     Simulation_Run_Data_Ptr data = (Simulation_Run_Data_Ptr) simulation_run_data(simulation_run);
     if(uniform_generator() < data->ack_transmission_failure_probability) {
-        TRACE(printf("Packet %d: Ack lost during transmission at time %.3f\n", packet.id, simulation_run_get_time(simulation_run));)
+        TRACE(printf("Station %d, packet %d: Ack lost during transmission at time %.5f\n", packet.station_id, packet.id, simulation_run_get_time(simulation_run));)
         return;
     }
 
@@ -323,12 +329,12 @@ void ack_event(Simulation_Run_Ptr simulation_run, Packet packet)
     if(packet_index != -1) {
         if(packet_index == 0 || RECEIVE_WINDOW_SIZE > 1) {
             data->stations[packet.station_id].send_window[packet_index].acked = true;
-            TRACE(printf("Packet %d: Ack received at time %.3f\n", packet.id, simulation_run_get_time(simulation_run));)
+            TRACE(printf("Station %d, packet %d: Ack received at time %.5f\n", packet.station_id, packet.id, simulation_run_get_time(simulation_run));)
         } else {
-            TRACE(printf("Packet %d: Ack received at time %.3f, but it was out of order in SW or GBN mode\n", packet.id, simulation_run_get_time(simulation_run));)
+            TRACE(printf("Station %d, packet %d: Ack received at time %.5f, but it was out of order in SW or GBN mode\n", packet.station_id, packet.id, simulation_run_get_time(simulation_run));)
         }
     } else {
-        TRACE(printf("Packet %d: ERROR: Ack received for unknown packet at time %.3f\n", packet.id, simulation_run_get_time(simulation_run));)
+        TRACE(printf("Station %d, packet %d: ERROR: Ack received for unknown packet at time %.5f\n", packet.station_id, packet.id, simulation_run_get_time(simulation_run));)
     }
 
     while(data->stations[packet.station_id].send_window[0].acked) {
@@ -365,7 +371,7 @@ void ack_event(Simulation_Run_Ptr simulation_run, Packet packet)
 
     // Schedule send event if there is an open slot in the send window and no other send events are scheduled
     if(open_send_slot_end && !open_send_slot_beginning) {
-        TRACE(printf("Scheduling next send event at current time %.3f\n", simulation_run_get_time(simulation_run));)
+        TRACE(printf("Station %d: scheduling next send event at current time %.5f\n", packet.station_id, simulation_run_get_time(simulation_run));)
         schedule_send_event(simulation_run, simulation_run_get_time(simulation_run), packet.station_id);
     }
 }
@@ -397,12 +403,12 @@ void timeout_event(Simulation_Run_Ptr simulation_run, Packet packet)
     }
 
     if(packet_index == -1) {
-        TRACE(printf("Packet %d:Timeout event for unknown packet at time %.3f\n", packet.id, simulation_run_get_time(simulation_run));)
+        TRACE(printf("Station %d, packet %d: timeout event for unknown packet at time %.5f\n", packet.station_id, packet.id, simulation_run_get_time(simulation_run));)
         return;
     }
 
     if(data->stations[packet.station_id].send_window[packet_index].acked) {
-        TRACE(printf("Packet %d: Timeout event for packet at time %.3f, but packet already acknowledged\n", packet.id, simulation_run_get_time(simulation_run));)
+        TRACE(printf("Station %d, packet %d: timeout event at time %.5f, but packet already acknowledged\n", packet.station_id, packet.id, simulation_run_get_time(simulation_run));)
         return;
     }
 
@@ -418,7 +424,7 @@ void timeout_event(Simulation_Run_Ptr simulation_run, Packet packet)
     // Mark the packet as unprocessed and unreserved so it can be resent
     data->stations[packet.station_id].send_window[packet_index].processed = false;
     data->stations[packet.station_id].send_window[packet_index].reservation_sent = false;
-    TRACE(printf("Packet %d: Timeout event for packet at time %.3f, resending\n", packet.id, simulation_run_get_time(simulation_run));)
+    TRACE(printf("Station %d, packet %d: timeout event at time %.5f, resending\n", packet.station_id, packet.id, simulation_run_get_time(simulation_run));)
 
     // Check if ack frees up an empty slot in the send window
     bool open_send_slot_end = false;
@@ -431,7 +437,7 @@ void timeout_event(Simulation_Run_Ptr simulation_run, Packet packet)
 
     // Schedule send event if there is an open slot in the send window and no other send events are scheduled
     if(open_send_slot_end && !open_send_slot_beginning) {
-        TRACE(printf("Scheduling next send event at current time %.3f\n", simulation_run_get_time(simulation_run));)
+        TRACE(printf("Station %d: scheduling next send event at current time %.5f\n", packet.station_id, simulation_run_get_time(simulation_run));)
         schedule_send_event(simulation_run, simulation_run_get_time(simulation_run), packet.station_id);
     }
 }

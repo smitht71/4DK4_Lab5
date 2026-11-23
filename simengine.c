@@ -125,9 +125,9 @@ simulation_run_schedule_event(Simulation_Run_Ptr simulation_run,
   current_time = simulation_run_get_time(simulation_run);
   event_list = simulation_run_get_eventlist(simulation_run);
 
-  TRACE(printf("At %.3f : ", current_time);)
+  TRACE(printf("At %.5f : ", current_time);)
   TRACE(event_print_type(new_event);)
-  TRACE(printf("Scheduled for  %.3f \n", new_event_time);)
+  TRACE(printf("Scheduled for  %.5f \n", new_event_time);)
 
   /* Test for time scheduling error. */
   if (new_event_time < current_time) {
@@ -309,7 +309,7 @@ simulation_run_execute_event(Simulation_Run_Ptr simulation_run)
 
   TRACE(printf("\n");)
   TRACE(event_print_type(current_container->event);)
-  TRACE(printf("occurring at %.3f\n", simulation_run_get_time(simulation_run));)
+  TRACE(printf("occurring at %.5f\n", simulation_run_get_time(simulation_run));)
 
   (*(current_container->event.function))(simulation_run,
 			current_container->event.attachment);
@@ -369,8 +369,8 @@ window_data_new(int send_window_size)
   int i;
   Window_Data_Ptr new_window_data;
 
+  (void) send_window_size;
   new_window_data = (Window_Data_Ptr) xmalloc(sizeof(Window_Data));
-    xmalloc(sizeof(Window_Entry) * send_window_size);
 
   for (i = 0; i < RECEIVE_WINDOW_SIZE; i++) {
     new_window_data->receive_window[i].id = i;
@@ -577,7 +577,7 @@ server_get(Server_Ptr server)
 static void
 event_print_type(Event event)
 {
-  printf("%s ", event.description);
+  printf("Station %d: %s ", event.attachment.station_id, event.description);
 }
 
 #endif /* TRACE_ON */

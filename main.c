@@ -30,8 +30,10 @@ main(void)
   int seed_count = 0;
   int window_index, probability_index, ack_probability_index;
   int timeout_interval_index, seed_index, i;
+  int station_index, max_send_window_size = 0;
   Simulation_Run_Ptr simulation_run;
-  Simulation_Run_Data data;
+  Station stations[2] = {{0}};
+  Simulation_Run_Data data = {0};
   double elapsed_time, elapsed_time_sum, average_elapsed_time;
   double efficiency_sum, average_efficiency;
   double sends_per_success_sum, average_sends_per_success;
@@ -55,7 +57,12 @@ main(void)
               "satisfy Ws + Wr <= 2^m.\n", SEND_WINDOW_SIZES[window_index]);
       return 1;
     }
+    if (SEND_WINDOW_SIZES[window_index] > max_send_window_size) {
+      max_send_window_size = SEND_WINDOW_SIZES[window_index];
+    }
   }
+
+  data.stations = stations;
 
   for (probability_index = 0; probability_index < probability_count;
        probability_index++) {
@@ -140,6 +147,21 @@ main(void)
     return 1;
   }
 
+  for (station_index = 0; station_index < 2; station_index++) {
+    stations[station_index].send_window = (Window_Entry *) malloc(
+      sizeof(*stations[station_index].send_window) * max_send_window_size);
+    if (stations[station_index].send_window == NULL) {
+      perror("Unable to allocate station send window");
+      free(stations[0].send_window);
+      free(stations[1].send_window);
+      fclose(csv_file);
+      free(seed_elapsed_times);
+      free(seed_efficiencies);
+      free(seed_sends_per_success);
+      return 1;
+    }
+  }
+
   for (window_index = 0; window_index < window_count; window_index++) {
     int send_window_size = SEND_WINDOW_SIZES[window_index];
 
@@ -166,22 +188,39 @@ main(void)
         random_seed = RANDOM_SEEDS[seed_index];
         random_generator_initialize(random_seed);
 
+        for (station_index = 0; station_index < 2; station_index++) {
+          stations[station_index].id = station_index;
+          stations[station_index].last_packet_id = -1;
+          stations[station_index].send_window_size = send_window_size;
+          stations[station_index].packet_count = 0;
+          stations[station_index].accumulated_delay = 0.0;
+          stations[station_index].mean_delay = 0.0;
+          stations[station_index].sequential_collisions = 0;
+          for (i = 0; i < send_window_size; i++) {
+            stations[station_index].send_window[i].id = i;
+            stations[station_index].send_window[i].processed = false;
+            stations[station_index].send_window[i].acked = false;
+            stations[station_index].send_window[i].transmission_count = 0;
+            stations[station_index].send_window[i].reservation_sent = false;
+          }
+        }
+
+        data.channel = channel_new();
+        data.successfully_reserved_queue = NULL;
         simulation_run = simulation_run_new(send_window_size);
         simulation_run_set_data(simulation_run, &data);
 
         data.packets_processed = 0;
         data.random_seed = random_seed;
         data.total_sends = 0;
-        data.stations[0].last_packet_id = -1;
-        data.stations[1].last_packet_id = -1;
         data.data_transmission_failure_probability = failure_probability;
         data.ack_transmission_failure_probability = ack_failure_probability;
         data.timeout_interval = timeout_interval;
 
-        schedule_send_event(simulation_run,
+        schedule_reservation_send_event(simulation_run,
                             simulation_run_get_time(simulation_run), 0);
 
-        schedule_send_event(simulation_run,
+        schedule_reservation_send_event(simulation_run,
                             simulation_run_get_time(simulation_run), 1);
 
         while (data.packets_processed < NUMBER_PACKETS_TO_SEND) {
@@ -240,6 +279,8 @@ main(void)
                data.efficiency);
 
         simulation_run_free_memory(simulation_run);
+        xfree(data.channel);
+        data.channel = NULL;
       }
 
       average_efficiency = efficiency_sum / seed_count;
@@ -266,6 +307,8 @@ main(void)
                 send_window_size, failure_probability, ack_failure_probability,
                 timeout_interval);
         fclose(csv_file);
+        free(stations[0].send_window);
+        free(stations[1].send_window);
         free(seed_elapsed_times);
         free(seed_efficiencies);
         free(seed_sends_per_success);
@@ -293,6 +336,8 @@ main(void)
     }
   }
 
+  free(stations[0].send_window);
+  free(stations[1].send_window);
   free(seed_elapsed_times);
   free(seed_efficiencies);
   free(seed_sends_per_success);
