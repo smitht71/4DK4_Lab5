@@ -44,8 +44,6 @@ typedef enum {WAITING, TRANSMITTING} Packet_Status;
 
 typedef struct _packet_ 
 {
-  double arrive_time;
-  double service_time;
   int station_id;
   int id;
   Packet_Status status;

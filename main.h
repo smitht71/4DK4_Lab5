@@ -25,7 +25,6 @@ typedef struct _simulation_run_data_
 {
   Station_Ptr stations;
   Channel_Ptr channel;
-  Fifoqueue_Ptr successfully_reserved_queue;
   long int packets_processed;
   unsigned random_seed;
   long int total_sends;

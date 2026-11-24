@@ -37,7 +37,12 @@ main(void)
   double elapsed_time, elapsed_time_sum, average_elapsed_time;
   double efficiency_sum, average_efficiency;
   double sends_per_success_sum, average_sends_per_success;
+  double overall_throughput, overall_throughput_sum;
+  double average_overall_throughput;
+  double station_throughput_sums[NUMBER_STATIONS] = {0};
+  double average_station_throughputs[NUMBER_STATIONS] = {0};
   double *seed_elapsed_times, *seed_efficiencies, *seed_sends_per_success;
+  double *seed_station_throughputs;
   FILE *csv_file;
 
   while (RANDOM_SEEDS[seed_count] != 0) {
@@ -104,12 +109,15 @@ main(void)
                                          seed_count);
   seed_sends_per_success = (double *) malloc(
     sizeof(*seed_sends_per_success) * seed_count);
+  seed_station_throughputs = (double *) malloc(
+    sizeof(*seed_station_throughputs) * seed_count * NUMBER_STATIONS);
   if (seed_elapsed_times == NULL || seed_efficiencies == NULL ||
-      seed_sends_per_success == NULL) {
+      seed_sends_per_success == NULL || seed_station_throughputs == NULL) {
     perror("Unable to allocate simulation results");
     free(seed_elapsed_times);
     free(seed_efficiencies);
     free(seed_sends_per_success);
+    free(seed_station_throughputs);
     return 1;
   }
 
@@ -119,11 +127,25 @@ main(void)
     free(seed_elapsed_times);
     free(seed_efficiencies);
     free(seed_sends_per_success);
+    free(seed_station_throughputs);
     return 1;
   }
 
   fprintf(csv_file, "SEND_WINDOW_SIZE,DATA_TRANSMISSION_FAILURE_PROBABILITY,"
           "ACK_TRANSMISSION_FAILURE_PROBABILITY,TIMEOUT_INTERVAL");
+  for (seed_index = 0; seed_index < seed_count; seed_index++) {
+    for (station_index = 0; station_index < NUMBER_STATIONS; station_index++) {
+      fprintf(csv_file, ",%u_STATION_%d_NORMALIZED_THROUGHPUT_FRACTION",
+              RANDOM_SEEDS[seed_index], station_index);
+    }
+    fprintf(csv_file, ",%u_OVERALL_NORMALIZED_THROUGHPUT_FRACTION",
+            RANDOM_SEEDS[seed_index]);
+  }
+  for (station_index = 0; station_index < NUMBER_STATIONS; station_index++) {
+    fprintf(csv_file, ",AVERAGE_STATION_%d_NORMALIZED_THROUGHPUT_FRACTION",
+            station_index);
+  }
+  fprintf(csv_file, ",AVERAGE_OVERALL_NORMALIZED_THROUGHPUT_FRACTION");
   for (seed_index = 0; seed_index < seed_count; seed_index++) {
     fprintf(csv_file, ",%u", RANDOM_SEEDS[seed_index]);
   }
@@ -144,6 +166,7 @@ main(void)
     free(seed_elapsed_times);
     free(seed_efficiencies);
     free(seed_sends_per_success);
+    free(seed_station_throughputs);
     return 1;
   }
 
@@ -159,6 +182,7 @@ main(void)
       free(seed_elapsed_times);
       free(seed_efficiencies);
       free(seed_sends_per_success);
+      free(seed_station_throughputs);
       return 1;
     }
   }
@@ -185,6 +209,10 @@ main(void)
       elapsed_time_sum = 0.0;
       efficiency_sum = 0.0;
       sends_per_success_sum = 0.0;
+      overall_throughput_sum = 0.0;
+      for (station_index = 0; station_index < NUMBER_STATIONS; station_index++) {
+        station_throughput_sums[station_index] = 0.0;
+      }
       for (seed_index = 0; seed_index < seed_count; seed_index++) {
         random_seed = RANDOM_SEEDS[seed_index];
         random_generator_initialize(random_seed);
@@ -207,7 +235,6 @@ main(void)
         }
 
         data.channel = channel_new();
-        data.successfully_reserved_queue = NULL;
         simulation_run = simulation_run_new(send_window_size);
         simulation_run_set_data(simulation_run, &data);
 
@@ -258,6 +285,18 @@ main(void)
         elapsed_time = simulation_run_get_time(simulation_run);
         seed_elapsed_times[seed_index] = elapsed_time;
         elapsed_time_sum += elapsed_time;
+        overall_throughput = 0.0;
+        for (station_index = 0; station_index < NUMBER_STATIONS; station_index++) {
+          double station_throughput = elapsed_time > 0.0
+            ? ((double) stations[station_index].packets_received / elapsed_time) *
+                DATA_TRANSMISSION_TIME
+            : 0.0;
+          seed_station_throughputs[station_index * seed_count + seed_index] =
+            station_throughput;
+          station_throughput_sums[station_index] += station_throughput;
+          overall_throughput += station_throughput;
+        }
+        overall_throughput_sum += overall_throughput;
         data.efficiency = elapsed_time > 0.0
           ? ((double) ((data.packets_processed * DATA_TRANSMISSION_TIME) +
                        DATA_PROPAGATION_DELAY) / elapsed_time) * 100.0
@@ -270,14 +309,20 @@ main(void)
         sends_per_success_sum += seed_sends_per_success[seed_index];
 
         printf("Ws=%d pd=%.3f pa=%.3f timeout=%.6f seed=%u: "
-               "completed at %.3f s, packets=%ld "
-               "(station %d=%ld, station %d=%ld), "
-               "average sends per success=%.3f, efficiency=%.2f%%\n",
+               "completed at %.3f s, packets=%ld, ",
                send_window_size, failure_probability, ack_failure_probability,
                timeout_interval, random_seed,
-               elapsed_time, data.packets_processed,
-               data.stations[0].id, data.stations[0].packets_received,
-               data.stations[1].id, data.stations[1].packets_received,
+               elapsed_time, data.packets_processed);
+        for (station_index = 0; station_index < NUMBER_STATIONS; station_index++) {
+          printf("station %d received=%ld normalized throughput=%.6f%s",
+                 stations[station_index].id,
+                 stations[station_index].packets_received,
+                 seed_station_throughputs[station_index * seed_count + seed_index],
+                 station_index + 1 < NUMBER_STATIONS ? "; " : ", ");
+        }
+        printf("overall normalized throughput=%.6f, "
+               "average sends per success=%.3f, efficiency=%.2f%%\n",
+               overall_throughput,
                seed_sends_per_success[seed_index],
                data.efficiency);
 
@@ -289,8 +334,27 @@ main(void)
       average_efficiency = efficiency_sum / seed_count;
       average_elapsed_time = elapsed_time_sum / seed_count;
       average_sends_per_success = sends_per_success_sum / seed_count;
+      average_overall_throughput = overall_throughput_sum / seed_count;
+      for (station_index = 0; station_index < NUMBER_STATIONS; station_index++) {
+        average_station_throughputs[station_index] =
+          station_throughput_sums[station_index] / seed_count;
+      }
       fprintf(csv_file, "%d,%.6f,%.6f,%.6f", send_window_size,
               failure_probability, ack_failure_probability, timeout_interval);
+      for (seed_index = 0; seed_index < seed_count; seed_index++) {
+        double seed_overall_throughput = 0.0;
+        for (station_index = 0; station_index < NUMBER_STATIONS; station_index++) {
+          double station_throughput =
+            seed_station_throughputs[station_index * seed_count + seed_index];
+          fprintf(csv_file, ",%.6f", station_throughput);
+          seed_overall_throughput += station_throughput;
+        }
+        fprintf(csv_file, ",%.6f", seed_overall_throughput);
+      }
+      for (station_index = 0; station_index < NUMBER_STATIONS; station_index++) {
+        fprintf(csv_file, ",%.6f", average_station_throughputs[station_index]);
+      }
+      fprintf(csv_file, ",%.6f", average_overall_throughput);
       for (seed_index = 0; seed_index < seed_count; seed_index++) {
         fprintf(csv_file, ",%.6f", seed_efficiencies[seed_index]);
       }
@@ -316,6 +380,7 @@ main(void)
         free(seed_elapsed_times);
         free(seed_efficiencies);
         free(seed_sends_per_success);
+        free(seed_station_throughputs);
         return 1;
       }
 
@@ -335,6 +400,19 @@ main(void)
              send_window_size, failure_probability, ack_failure_probability,
              timeout_interval, seed_count,
              average_sends_per_success);
+      printf("Average throughput for SEND_WINDOW_SIZE=%d, "
+             "DATA_TRANSMISSION_FAILURE_PROBABILITY=%.3f, "
+             "ACK_TRANSMISSION_FAILURE_PROBABILITY=%.3f, "
+             "TIMEOUT_INTERVAL=%.6f across %d seeds: ",
+             send_window_size, failure_probability, ack_failure_probability,
+             timeout_interval, seed_count);
+      for (station_index = 0; station_index < NUMBER_STATIONS; station_index++) {
+        printf("station %d=%.6f, ",
+               stations[station_index].id,
+               average_station_throughputs[station_index]);
+      }
+      printf("overall=%.6f normalized throughput fraction\n\n",
+             average_overall_throughput);
       }
       }
     }
@@ -346,11 +424,12 @@ main(void)
   free(seed_elapsed_times);
   free(seed_efficiencies);
   free(seed_sends_per_success);
+  free(seed_station_throughputs);
   if (fclose(csv_file) != 0) {
     perror("Unable to finish writing efficiency.csv");
     return 1;
   }
 
-  printf("Wrote per-seed and average efficiencies to efficiency.csv\n");
+  printf("Wrote per-seed efficiencies and throughputs to efficiency.csv\n");
   return 0;
 }
